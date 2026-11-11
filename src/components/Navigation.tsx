@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   Sliders,
   Lock,
+  Bell,
 } from 'lucide-react';
 
 export type NavTab =
@@ -27,6 +28,8 @@ export type NavTab =
   | 'payroll'
   | 'equipment'
   | 'audit'
+  | 'notifications'
+  | 'pos'
   | 'settings';
 
 interface NavigationProps {
@@ -46,6 +49,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   // Role permissions check for navigation visibility / lock indicators
   const canAccessFinance = ['owner', 'finance'].includes(userRole);
+  const canAccessCustomerRequests = canAccessFinance || userRole === 'front_desk_crm';
   const canAccessPayroll = ['owner', 'finance', 'hr'].includes(userRole);
   const canAccessAudit = userRole === 'owner';
 
@@ -57,18 +61,26 @@ export const Navigation: React.FC<NavigationProps> = ({
     lockReason?: string;
   }[] = [
     { id: 'dashboard', label: t.navDashboard, icon: LayoutDashboard },
-    { id: 'students_crm', label: t.navStudentsCRM, icon: Users },
-    { id: 'courses', label: t.navCourses, icon: GraduationCap },
-    { id: 'calendar', label: t.navCalendar, icon: Calendar },
-    { id: 'daily_ops', label: t.navDailyOps, icon: Anchor },
-    { id: 'staff', label: t.navStaff, icon: UserCheck },
+    { id: 'calendar', label: 'Planner Calendar', icon: Calendar },
     {
       id: 'finance',
-      label: t.navFinance,
+      label: 'Invoices & Bills',
       icon: Receipt,
-      locked: !canAccessFinance,
-      lockReason: 'Owner & Finance only',
+      locked: !canAccessCustomerRequests,
+      lockReason: 'Owner, Finance & Front Desk only',
     },
+    { id: 'notifications', label: 'Notifications', icon: Bell },
+    {
+      id: 'pos',
+      label: 'POS',
+      icon: Receipt,
+      locked: !['owner', 'finance', 'front_desk_crm'].includes(userRole),
+      lockReason: 'Owner, Finance & Front Desk only',
+    },
+    { id: 'students_crm', label: t.navStudentsCRM, icon: Users },
+    { id: 'courses', label: t.navCourses, icon: GraduationCap },
+    { id: 'daily_ops', label: t.navDailyOps, icon: Anchor },
+    { id: 'staff', label: t.navStaff, icon: UserCheck },
     {
       id: 'payroll',
       label: t.navPayroll,

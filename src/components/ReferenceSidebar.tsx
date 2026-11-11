@@ -29,6 +29,8 @@ import {
 interface ReferenceSidebarProps {
   activeTab: NavTab;
   onTabChange: (tab: NavTab) => void;
+  isMobileOpen: boolean;
+  onCloseMobile: () => void;
   userRole: UserRole;
   currentUser: User | null;
   isCollapsed: boolean;
@@ -40,6 +42,8 @@ interface ReferenceSidebarProps {
 export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
   activeTab,
   onTabChange,
+  isMobileOpen,
+  onCloseMobile,
   userRole,
   currentUser,
   isCollapsed,
@@ -52,52 +56,55 @@ export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
   const [showMoreErp, setShowMoreErp] = useState(true);
 
   const canAccessFinance = ['owner', 'finance'].includes(userRole);
+  const canAccessCustomerRequests = canAccessFinance || userRole === 'front_desk_crm';
   const canAccessPayroll = ['owner', 'finance', 'hr'].includes(userRole);
   const canAccessAudit = userRole === 'owner';
 
-  // Primary navigation items directly matching the reference picture
+  // Keep the five daily work areas at the top; less frequent modules remain grouped below.
   const primaryNavItems = [
-    {
-      id: 'students_crm' as NavTab,
-      label: 'Contacts',
-      icon: Users,
-      badge: undefined,
-    },
     {
       id: 'dashboard' as NavTab,
       label: 'Dashboard',
       icon: BarChart3,
-      badge: undefined,
-    },
-    {
-      id: 'daily_ops' as NavTab,
-      label: 'Tasks',
-      icon: Briefcase,
-      badge: undefined,
     },
     {
       id: 'calendar' as NavTab,
-      label: 'Calendar',
+      label: 'Planner',
       icon: CalendarIcon,
-      badge: undefined,
     },
     {
-      id: 'audit' as NavTab,
+      id: 'finance' as NavTab,
+      label: 'Invoices & Bills',
+      icon: Receipt,
+      locked: !canAccessCustomerRequests,
+      lockReason: 'Owner, Finance & Front Desk only',
+    },
+    {
+      id: 'notifications' as NavTab,
       label: 'Notifications',
       icon: Bell,
-      locked: !canAccessAudit,
-      lockReason: 'Owner only',
     },
     {
-      id: 'settings' as NavTab,
-      label: 'Settings',
-      icon: SettingsIcon,
-      badge: undefined,
+      id: 'pos' as NavTab,
+      label: 'POS',
+      icon: DollarSign,
+      locked: !canAccessCustomerRequests,
+      lockReason: 'Owner, Finance & Front Desk only',
     },
   ];
 
   // Secondary ERP modules for Freedive Dahab operations
   const erpNavItems = [
+    {
+      id: 'students_crm' as NavTab,
+      label: 'Contacts',
+      icon: Users,
+    },
+    {
+      id: 'daily_ops' as NavTab,
+      label: 'Tasks',
+      icon: Briefcase,
+    },
     {
       id: 'courses' as NavTab,
       label: 'Courses',
@@ -109,13 +116,6 @@ export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
       icon: UserCheck,
     },
     {
-      id: 'finance' as NavTab,
-      label: 'Finance',
-      icon: Receipt,
-      locked: !canAccessFinance,
-      lockReason: 'Finance & Owner only',
-    },
-    {
       id: 'payroll' as NavTab,
       label: 'Payroll',
       icon: DollarSign,
@@ -123,17 +123,39 @@ export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
       lockReason: 'Payroll & HR only',
     },
     {
+      id: 'audit' as NavTab,
+      label: 'Security Audit',
+      icon: ShieldAlert,
+      locked: !canAccessAudit,
+      lockReason: 'Owner only',
+    },
+    {
       id: 'equipment' as NavTab,
       label: 'Equipment',
       icon: Package,
+    },
+    {
+      id: 'settings' as NavTab,
+      label: 'Settings',
+      icon: SettingsIcon,
     },
   ];
 
   return (
     <>
+      {isMobileOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={onCloseMobile}
+          className="fixed inset-0 z-30 bg-slate-950/50 md:hidden"
+        />
+      )}
       <aside
         className={`fixed top-0 bottom-0 left-0 z-40 transition-all duration-300 flex flex-col justify-between ${
           isCollapsed ? 'w-20' : 'w-64'
+        } ${
+          isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 rtl:translate-x-full rtl:md:translate-x-0'
         } bg-[#28334E] text-[#94A3B8] rounded-br-[42px] rtl:rounded-br-none rtl:rounded-bl-[42px] rtl:left-auto rtl:right-0 shadow-xl overflow-hidden`}
       >
         {/* Top Header / Logo Area */}
@@ -184,17 +206,31 @@ export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
 
             {/* Collapse / Expand Toggle Button */}
             {!isCollapsed ? (
-              <button
-                onClick={onToggleCollapse}
-                title="Collapse sidebar"
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
-              >
-                <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={onCloseMobile}
+                  aria-label="Close navigation"
+                  className="md:hidden w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleCollapse}
+                  title="Collapse sidebar"
+                  aria-label="Collapse sidebar"
+                  className="hidden md:flex w-8 h-8 rounded-lg items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
+                </button>
+              </>
             ) : (
               <button
+                type="button"
                 onClick={onToggleCollapse}
                 title="Expand sidebar"
+                aria-label="Expand sidebar"
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer mx-auto"
               >
                 <Menu className="w-4 h-4" />
@@ -206,7 +242,7 @@ export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
         {/* Scrollable Navigation Area */}
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-6 no-scrollbar">
           {/* Primary Reference Navigation Items */}
-          <nav className="space-y-1.5">
+          <nav aria-label="Primary navigation" className="space-y-1.5">
             {primaryNavItems.map((item) => {
               const isActive = activeTab === item.id;
               const Icon = item.icon;
@@ -233,6 +269,7 @@ export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
 
               return (
                 <button
+                  type="button"
                   key={item.id}
                   onClick={() => onTabChange(item.id)}
                   title={item.label}
@@ -284,7 +321,9 @@ export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
           {!isCollapsed && (
             <div className="pt-2 border-t border-slate-700/40">
               <button
+                type="button"
                 onClick={() => setShowMoreErp(!showMoreErp)}
+                aria-expanded={showMoreErp}
                 className="w-full flex items-center justify-between px-3 text-[11px] font-bold text-slate-400 hover:text-slate-300 tracking-wider uppercase mb-2 cursor-pointer"
               >
                 <span>ERP Operations</span>
@@ -319,6 +358,7 @@ export const ReferenceSidebar: React.FC<ReferenceSidebarProps> = ({
 
                     return (
                       <button
+                        type="button"
                         key={item.id}
                         onClick={() => onTabChange(item.id)}
                         className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer ${

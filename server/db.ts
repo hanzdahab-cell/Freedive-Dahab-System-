@@ -11,6 +11,20 @@ if (!fs.existsSync(dataDir)) {
 const dbPath = path.join(dataDir, 'freedive_dahab.db');
 export const db = new Database(dbPath);
 
+export type BookingSafetyRules = {
+  waiver_valid_days: number;
+  minimum_deposit_percent: number;
+  max_divers_per_buoy: number;
+  ras_mohamed_min_participants: number;
+};
+
+export const DEFAULT_BOOKING_SAFETY_RULES: BookingSafetyRules = {
+  waiver_valid_days: 365,
+  minimum_deposit_percent: 30,
+  max_divers_per_buoy: 3,
+  ras_mohamed_min_participants: 4,
+};
+
 // Enable WAL mode for high concurrency & foreign keys
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -75,6 +89,7 @@ export function initializeDatabase() {
       static_apnea_pb TEXT, -- e.g. "04:15"
       medical_waiver_signed INTEGER NOT NULL DEFAULT 0,
       medical_waiver_date TEXT,
+      medical_clearance_status TEXT NOT NULL DEFAULT 'unknown',
       medical_notes TEXT, -- Confidential: only authorized roles (owner, operations_manager, hr)
       emergency_contact_name TEXT,
       emergency_contact_phone TEXT,
@@ -132,6 +147,7 @@ export function initializeDatabase() {
       location TEXT NOT NULL DEFAULT 'Lighthouse Bay / Blue Hole',
       status TEXT NOT NULL DEFAULT 'scheduled', -- 'scheduled', 'in_progress', 'completed', 'cancelled'
       max_capacity INTEGER NOT NULL DEFAULT 4,
+      buoy_count INTEGER NOT NULL DEFAULT 0,
       notes TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE RESTRICT,
@@ -150,6 +166,8 @@ export function initializeDatabase() {
       price REAL NOT NULL,
       currency TEXT NOT NULL DEFAULT 'EUR',
       payment_status TEXT NOT NULL DEFAULT 'unpaid', -- 'unpaid', 'partially_paid', 'paid', 'refunded'
+      prerequisites_verified INTEGER NOT NULL DEFAULT 0,
+      assigned_buoy INTEGER,
       notes TEXT,
       created_by TEXT,
       created_at TEXT NOT NULL,
@@ -219,6 +237,7 @@ export function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS invoice_items (
       id TEXT PRIMARY KEY,
       invoice_id TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other',
       description TEXT NOT NULL,
       quantity REAL NOT NULL DEFAULT 1,
       unit_price REAL NOT NULL DEFAULT 0,
@@ -239,6 +258,19 @@ export function initializeDatabase() {
       recorded_by TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE RESTRICT
+    );
+
+    -- Customer requests are invoiced through the existing billing ledger.
+    CREATE TABLE IF NOT EXISTS customer_requests (
+      id TEXT PRIMARY KEY,
+      request_number TEXT UNIQUE NOT NULL,
+      invoice_id TEXT UNIQUE NOT NULL,
+      special_request TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
     );
 
     -- Supplier Bills & Center Expenses
@@ -347,5 +379,32 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
     CREATE INDEX IF NOT EXISTS idx_payroll_period ON payroll_records(period_id);
     CREATE INDEX IF NOT EXISTS idx_equipment_cat ON equipment(category);
+    CREATE INDEX IF NOT EXISTS idx_customer_requests_created ON customer_requests(created_at);
   `);
+
+  const invoiceItemColumns = db.pragma('table_info(invoice_items)') as Array<{ name: string }>;
+  if (!invoiceItemColumns.some((column) => column.name === 'category')) {
+    db.exec("ALTER TABLE invoice_items ADD COLUMN category TEXT NOT NULL DEFAULT 'other'");
+  }
+
+  const studentColumns = db.pragma('table_info(students)') as Array<{ name: string }>;
+  if (!studentColumns.some((column) => column.name === 'medical_clearance_status')) {
+    db.exec("ALTER TABLE students ADD COLUMN medical_clearance_status TEXT NOT NULL DEFAULT 'unknown'");
+  }
+
+  const courseSessionColumns = db.pragma('table_info(course_sessions)') as Array<{ name: string }>;
+  if (!courseSessionColumns.some((column) => column.name === 'buoy_count')) {
+    db.exec('ALTER TABLE course_sessions ADD COLUMN buoy_count INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const bookingColumns = db.pragma('table_info(bookings)') as Array<{ name: string }>;
+  if (!bookingColumns.some((column) => column.name === 'prerequisites_verified')) {
+    db.exec('ALTER TABLE bookings ADD COLUMN prerequisites_verified INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!bookingColumns.some((column) => column.name === 'assigned_buoy')) {
+    db.exec('ALTER TABLE bookings ADD COLUMN assigned_buoy INTEGER');
+  }
+
+  db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)')
+    .run('booking_safety_rules', JSON.stringify(DEFAULT_BOOKING_SAFETY_RULES));
 }

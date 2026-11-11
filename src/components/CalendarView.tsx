@@ -29,9 +29,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [selectedInstructor, setSelectedInstructor] = useState('ALL');
 
-  // Dates for current month (November 2026 based on Dahab season)
-  const [currentYear, setCurrentYear] = useState(2026);
-  const [currentMonth, setCurrentMonth] = useState(10); // 10 is November (0-indexed)
+  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear());
+  const [currentMonth, setCurrentMonth] = useState(() => new Date().getMonth());
+  const [today] = useState(() => new Date());
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -124,8 +124,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </button>
             <button
               onClick={() => {
-                setCurrentYear(2026);
-                setCurrentMonth(10);
+                const now = new Date();
+                setCurrentYear(now.getFullYear());
+                setCurrentMonth(now.getMonth());
               }}
               className="px-3 py-1 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-[#4C8BF5] cursor-pointer"
             >
@@ -169,7 +170,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               currentMonth,
               dayNum
             );
-            const isToday = dayNum === 2;
+            const isToday =
+              currentYear === today.getFullYear() &&
+              currentMonth === today.getMonth() &&
+              dayNum === today.getDate();
 
             return (
               <div

@@ -35,6 +35,7 @@ export interface Student {
   static_apnea_pb?: string;
   medical_waiver_signed: number;
   medical_waiver_date?: string;
+  medical_clearance_status?: 'unknown' | 'cleared' | 'physician_approved';
   medical_notes?: string;
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
@@ -91,6 +92,8 @@ export interface CourseSession {
   location: string;
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
   max_capacity: number;
+  buoy_count: number;
+  prerequisites?: string;
   enrolled_count?: number;
   notes?: string;
 }
@@ -112,6 +115,7 @@ export interface Booking {
   start_date?: string;
   end_date?: string;
   location?: string;
+  assigned_buoy?: number | null;
   instructor_name?: string;
   booking_date: string;
   status: 'pending' | 'confirmed' | 'attended' | 'certified' | 'cancelled';
@@ -151,10 +155,76 @@ export interface DailyActivity {
 
 export interface InvoiceItem {
   id?: string;
+  category?: 'course' | 'package' | 'accommodation' | 'activity' | 'workshop' | 'training' | 'gear_rental' | 'shop' | 'other';
   description: string;
   quantity: number;
   unit_price: number;
   total_price: number;
+}
+
+export interface InvoiceUpdateInput {
+  issue_date: string;
+  due_date: string;
+  tax_rate: number;
+  notes: string;
+  items: Array<{
+    category: NonNullable<InvoiceItem['category']>;
+    description: string;
+    quantity: number;
+    unit_price: number;
+  }>;
+}
+
+export interface FinanceOpeningBalances {
+  EUR: number;
+  USD: number;
+  EGP: number;
+}
+
+export interface FinanceCashSummary {
+  opening_balances: FinanceOpeningBalances;
+  income_by_currency: FinanceOpeningBalances;
+  expenses_by_currency: FinanceOpeningBalances;
+  current_balances: FinanceOpeningBalances;
+}
+
+export interface CustomerRequestItemInput {
+  category: 'course' | 'package' | 'accommodation' | 'activity' | 'workshop' | 'training' | 'gear_rental' | 'shop' | 'other';
+  description: string;
+  quantity: number;
+  unit_price: number;
+  equipment_id?: string;
+  expected_return?: string;
+}
+
+export interface CustomerRequest extends Invoice {
+  request_id: string;
+  request_number: string;
+  special_request?: string;
+}
+
+export interface CustomerRequestInput {
+  student_id: string;
+  currency: string;
+  due_date: string;
+  special_request: string;
+  items: CustomerRequestItemInput[];
+  initial_payment: {
+    amount: number;
+    payment_method: string;
+    payment_date: string;
+    reference_number: string;
+    notes: string;
+  };
+}
+
+export interface PaymentInput {
+  amount: number;
+  currency: string;
+  payment_method: string;
+  payment_date: string;
+  reference_number: string;
+  notes: string;
 }
 
 export interface Payment {
@@ -175,6 +245,7 @@ export interface Invoice {
   first_name?: string;
   last_name?: string;
   student_email?: string;
+  student_phone?: string;
   booking_id?: string;
   issue_date: string;
   due_date: string;
@@ -186,6 +257,7 @@ export interface Invoice {
   paid_amount: number;
   status: 'draft' | 'issued' | 'partially_paid' | 'paid' | 'overdue' | 'cancelled';
   notes?: string;
+  customer_request_number?: string;
   items?: InvoiceItem[];
   payments?: Payment[];
 }
@@ -251,6 +323,20 @@ export interface Equipment {
   location: string;
   last_inspected?: string;
   low_stock_threshold: number;
+  notes?: string;
+}
+
+export interface EquipmentCheckout {
+  id: string;
+  equipment_id: string;
+  item_name: string;
+  size?: string;
+  student_id?: string;
+  student_name?: string;
+  instructor_id?: string;
+  checkout_time: string;
+  expected_return?: string;
+  condition_out: string;
   notes?: string;
 }
 

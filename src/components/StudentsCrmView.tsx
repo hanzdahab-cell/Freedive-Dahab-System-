@@ -17,6 +17,12 @@ import {
   Check,
 } from 'lucide-react';
 
+type MedicalClearanceStatus = 'unknown' | 'cleared' | 'physician_approved';
+
+function isMedicalClearanceStatus(value: string): value is MedicalClearanceStatus {
+  return ['unknown', 'cleared', 'physician_approved'].includes(value);
+}
+
 interface StudentsCrmViewProps {
   students: Student[];
   inquiries: Inquiry[];
@@ -24,6 +30,7 @@ interface StudentsCrmViewProps {
   onRefresh: () => void;
   onRegisterStudent: (studentData: any) => Promise<void>;
   onUpdateWaiver: (studentId: string, signed: boolean, notes?: string) => Promise<void>;
+  onUpdateMedicalClearance: (studentId: string, status: MedicalClearanceStatus) => Promise<void>;
   onCreateInquiry: (inquiryData: any) => Promise<void>;
   onUpdateInquiryStatus: (inquiryId: string, status: string) => Promise<void>;
   lang: Language;
@@ -36,6 +43,7 @@ export const StudentsCrmView: React.FC<StudentsCrmViewProps> = ({
   onRefresh,
   onRegisterStudent,
   onUpdateWaiver,
+  onUpdateMedicalClearance,
   onCreateInquiry,
   onUpdateInquiryStatus,
   lang,
@@ -68,10 +76,26 @@ export const StudentsCrmView: React.FC<StudentsCrmViewProps> = ({
     certification_level: 'Freediver',
     total_depth_pb: 0,
     medical_waiver_signed: false,
+    medical_waiver_date: '',
     medical_notes: '',
   });
 
   const isHealthAuthorized = ['owner', 'operations_manager', 'hr'].includes(userRole);
+
+  const handleMedicalClearanceChange = async (status: MedicalClearanceStatus) => {
+    if (!selectedStudent) return;
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      await onUpdateMedicalClearance(selectedStudent.id, status);
+      setSelectedStudent({ ...selectedStudent, medical_clearance_status: status });
+      await onRefresh();
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to update medical clearance');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // Sample contacts mapped for high visual fidelity with the reference picture
   const sampleContacts = [
@@ -198,6 +222,7 @@ export const StudentsCrmView: React.FC<StudentsCrmViewProps> = ({
         certification_level: newContact.certification_level,
         total_depth_pb: newContact.total_depth_pb,
         medical_waiver_signed: newContact.medical_waiver_signed,
+        medical_waiver_date: newContact.medical_waiver_signed ? newContact.medical_waiver_date : null,
         medical_notes: newContact.medical_notes,
       });
       setIsCreateContactModalOpen(false);
@@ -211,6 +236,7 @@ export const StudentsCrmView: React.FC<StudentsCrmViewProps> = ({
         certification_level: 'Freediver',
         total_depth_pb: 0,
         medical_waiver_signed: false,
+        medical_waiver_date: '',
         medical_notes: '',
       });
       await onRefresh();
@@ -610,9 +636,25 @@ export const StudentsCrmView: React.FC<StudentsCrmViewProps> = ({
                   className="rounded border-slate-300 text-[#4C8BF5]"
                 />
                 <label htmlFor="waiver_signed" className="text-slate-700 dark:text-slate-300 cursor-pointer font-medium">
-                  Liability waiver & medical statement verified on file
+                  Signed waiver on file
                 </label>
               </div>
+              {newContact.medical_waiver_signed && (
+                <div>
+                  <label htmlFor="new-student-waiver-date" className="block text-slate-600 dark:text-slate-400 mb-1 font-semibold">
+                    Waiver signature date *
+                  </label>
+                  <input
+                    id="new-student-waiver-date"
+                    type="date"
+                    required
+                    max={new Date().toISOString().slice(0, 10)}
+                    value={newContact.medical_waiver_date}
+                    onChange={(e) => setNewContact({ ...newContact, medical_waiver_date: e.target.value })}
+                    className="w-full bg-[#F8FAFC] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
+                  />
+                </div>
+              )}
 
               <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -665,12 +707,40 @@ export const StudentsCrmView: React.FC<StudentsCrmViewProps> = ({
                   </div>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                  <span className="text-slate-400 text-[10px] uppercase font-bold">Medical Waiver</span>
+                  <span className="text-slate-400 text-[10px] uppercase font-bold">Signed Waiver</span>
                   <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
-                    {selectedStudent.medical_waiver_signed ? 'Signed & Cleared' : 'Signature Pending'}
+                    {selectedStudent.medical_waiver_signed ? 'Signed' : 'Signature Pending'}
                   </div>
                 </div>
               </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                <label htmlFor="medical-clearance-status" className="block text-slate-500 dark:text-slate-400 text-[10px] uppercase font-bold mb-1">
+                  Medical clearance
+                </label>
+                {isHealthAuthorized ? (
+                  <select
+                    id="medical-clearance-status"
+                    value={selectedStudent.medical_clearance_status || 'unknown'}
+                    disabled={submitting}
+                    onChange={(event) => {
+                      if (isMedicalClearanceStatus(event.target.value)) {
+                        void handleMedicalClearanceChange(event.target.value);
+                      }
+                    }}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-2 text-slate-900 dark:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                  >
+                    <option value="unknown">Unknown / not cleared</option>
+                    <option value="cleared">Cleared</option>
+                    <option value="physician_approved">Physician approved</option>
+                  </select>
+                ) : (
+                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                    {selectedStudent.medical_clearance_status || 'Restricted / not available'}
+                  </div>
+                )}
+              </div>
+              {formError && <p role="alert" className="text-sm text-rose-600">{formError}</p>}
 
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2">
                 <div className="font-semibold text-slate-900 dark:text-white">Contact Info</div>

@@ -57,3 +57,46 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+@page {
+  margin: 14mm;
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  .invoice-print-dialog[open],
+  .invoice-print-dialog[open] * {
+    visibility: visible !important;
+  }
+
+  .invoice-print-dialog[open] {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    color: #111827 !important;
+  }
+
+  .invoice-print-scroll {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .invoice-print-actions {
+    display: none !important;
+  }
+
+  .invoice-print-document {
+    padding: 0 !important;
+    color: #111827 !important;
+  }
+}

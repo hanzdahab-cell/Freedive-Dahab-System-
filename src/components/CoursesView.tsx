@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Course, CourseSession, Student, User, UserRole, Booking } from '../types';
 import { Language, translations } from '../i18n';
+import { apiRequest } from '../api';
 import {
   GraduationCap,
   Calendar,
@@ -15,6 +16,34 @@ import {
   UserCheck,
 } from 'lucide-react';
 
+interface BookingSafetyRules {
+  waiver_valid_days: number;
+  minimum_deposit_percent: number;
+  max_divers_per_buoy: number;
+  ras_mohamed_min_participants: number;
+}
+
+function isBookingSafetyRules(value: unknown): value is BookingSafetyRules {
+  if (!value || typeof value !== 'object') return false;
+  const rules = value as Record<string, unknown>;
+  return typeof rules.waiver_valid_days === 'number' &&
+    Number.isInteger(rules.waiver_valid_days) &&
+    rules.waiver_valid_days >= 1 &&
+    rules.waiver_valid_days <= 3650 &&
+    typeof rules.minimum_deposit_percent === 'number' &&
+    Number.isFinite(rules.minimum_deposit_percent) &&
+    rules.minimum_deposit_percent >= 1 &&
+    rules.minimum_deposit_percent <= 100 &&
+    typeof rules.max_divers_per_buoy === 'number' &&
+    Number.isInteger(rules.max_divers_per_buoy) &&
+    rules.max_divers_per_buoy >= 1 &&
+    rules.max_divers_per_buoy <= 10 &&
+    typeof rules.ras_mohamed_min_participants === 'number' &&
+    Number.isInteger(rules.ras_mohamed_min_participants) &&
+    rules.ras_mohamed_min_participants >= 1 &&
+    rules.ras_mohamed_min_participants <= 100;
+}
+
 interface CoursesViewProps {
   courses: Course[];
   sessions: CourseSession[];
@@ -24,6 +53,8 @@ interface CoursesViewProps {
   userRole: UserRole;
   onRefresh: () => void;
   onScheduleSession: (sessionData: any) => Promise<void>;
+  onUpdateSession: (sessionId: string, sessionData: { buoy_count: number }) => Promise<void>;
+  onUpdateBooking: (bookingId: string, data: { assigned_buoy: number }) => Promise<void>;
   onEnrollBooking: (bookingData: any) => Promise<void>;
   lang: Language;
 }
@@ -37,6 +68,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   userRole,
   onRefresh,
   onScheduleSession,
+  onUpdateSession,
+  onUpdateBooking,
   onEnrollBooking,
   lang,
 }) => {
@@ -50,6 +83,25 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [sessionBuoyEdits, setSessionBuoyEdits] = useState<Record<string, string>>({});
+  const [sessionUpdateError, setSessionUpdateError] = useState<string | null>(null);
+  const [safetyRules, setSafetyRules] = useState<BookingSafetyRules | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<Record<string, string>>('/api/settings')
+      .then((settings) => {
+        if (!active || !settings.booking_safety_rules) return;
+        const parsed: unknown = JSON.parse(settings.booking_safety_rules);
+        if (isBookingSafetyRules(parsed)) setSafetyRules(parsed);
+      })
+      .catch(() => {
+        if (active) setSafetyRules(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // New session state
   const [newSession, setNewSession] = useState({
@@ -59,6 +111,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     end_date: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
     location: 'Lighthouse Bay & Blue Hole',
     max_capacity: 4,
+    buoy_count: 1,
     notes: '',
   });
 
@@ -69,11 +122,16 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     course_id: '',
     price: 320,
     currency: 'EUR',
-    payment_status: 'unpaid',
+    deposit_amount: 0,
+    payment_method: 'Cash EUR',
+    payment_date: new Date().toISOString().slice(0, 10),
+    prerequisites_verified: false,
+    assigned_buoy: '',
     notes: '',
   });
 
   const canManageCourses = ['owner', 'operations_manager'].includes(userRole);
+  const canManageBookingOperations = ['owner', 'operations_manager', 'front_desk_crm'].includes(userRole);
 
   const handleScheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,10 +171,49 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       course_id: ses.course_id,
       price: ses.price_eur || 320,
       currency: 'EUR',
-      payment_status: 'unpaid',
+      deposit_amount: 0,
+      payment_method: 'Cash EUR',
+      payment_date: new Date().toISOString().slice(0, 10),
+      prerequisites_verified: false,
+      assigned_buoy: '',
       notes: `Enrolled in ${ses.course_title}`,
     });
     setIsEnrollModalOpen(true);
+  };
+
+  const saveSessionBuoyCount = async (sessionId: string, value: string) => {
+    const buoyCount = Number(value);
+    if (!Number.isInteger(buoyCount) || buoyCount < 1) {
+      setSessionUpdateError('Assign at least one buoy before bookings can be confirmed.');
+      return;
+    }
+    setSessionUpdateError(null);
+    try {
+      await onUpdateSession(sessionId, { buoy_count: buoyCount });
+      setSessionBuoyEdits((edits) => {
+        const next = { ...edits };
+        delete next[sessionId];
+        return next;
+      });
+      await onRefresh();
+    } catch (err: any) {
+      setSessionUpdateError(err.message || 'Failed to update session buoy count');
+    }
+  };
+
+  const assignBookingBuoy = async (bookingId: string, value: string) => {
+    const assignedBuoy = Number(value);
+    if (!Number.isInteger(assignedBuoy) || assignedBuoy < 1) {
+      setSessionUpdateError('Choose a numbered buoy assignment for every active diver.');
+      return;
+    }
+    setSessionUpdateError(null);
+    try {
+      await onUpdateBooking(bookingId, { assigned_buoy: assignedBuoy });
+      await onRefresh();
+    } catch (err: any) {
+      setSessionUpdateError(err.message || 'Failed to assign the diver to a buoy');
+    }
   };
 
   return (
@@ -160,6 +257,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       {/* SESSIONS VIEW */}
       {activeTab === 'sessions' && (
         <div className="space-y-4">
+          {sessionUpdateError && (
+            <p role="alert" className="rounded-lg bg-rose-950/80 border border-rose-800 px-4 py-3 text-rose-300 text-xs">
+              {sessionUpdateError}
+            </p>
+          )}
           <div className="bg-white dark:bg-[#0c1427] border border-[#e4e8ec] dark:border-[#1e293b] rounded-2xl overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600 dark:text-slate-300">
@@ -226,6 +328,54 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                               <span className="font-mono text-xs">
                                 {ses.enrolled_count || 0}/{ses.max_capacity}
                               </span>
+                            </div>
+                            {canManageBookingOperations ? (
+                              <label className="mt-2 flex items-center gap-2 text-[10px] text-slate-400">
+                                <span>Buoys (limit configured in Settings)</span>
+                                <input
+                                  aria-label={`Assigned buoys for ${ses.course_title}`}
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  value={sessionBuoyEdits[ses.id] ?? String(ses.buoy_count || 0)}
+                                  onChange={(event) => setSessionBuoyEdits({ ...sessionBuoyEdits, [ses.id]: event.target.value })}
+                                  onBlur={(event) => {
+                                    const edited = sessionBuoyEdits[ses.id];
+                                    if (edited !== undefined && edited !== String(ses.buoy_count || 0)) {
+                                      void saveSessionBuoyCount(ses.id, event.target.value);
+                                    }
+                                  }}
+                                  className="w-14 rounded border border-cyan-900/60 bg-[#071322] px-1.5 py-1 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400"
+                                />
+                              </label>
+                            ) : (
+                              <p className="mt-2 text-[10px] text-slate-400">Assigned buoys: {ses.buoy_count || 'Not set'}</p>
+                            )}
+                            <div className="mt-2 space-y-1">
+                              {bookings
+                                .filter((booking) => booking.session_id === ses.id && booking.status !== 'cancelled')
+                                .map((booking) => (
+                                  <label key={booking.id} className="flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                                    <span>{booking.first_name} {booking.last_name}</span>
+                                    {canManageBookingOperations ? (
+                                      <select
+                                        aria-label={`Buoy assignment for ${booking.first_name} ${booking.last_name}`}
+                                        value={booking.assigned_buoy ?? ''}
+                                        onChange={(event) => {
+                                          if (event.target.value) void assignBookingBuoy(booking.id, event.target.value);
+                                        }}
+                                        className="w-16 rounded border border-cyan-900/60 bg-[#071322] px-1.5 py-1 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400"
+                                      >
+                                        <option value="">Unassigned</option>
+                                        {Array.from({ length: Math.max(0, ses.buoy_count || 0) }, (_, index) => (
+                                          <option key={index + 1} value={index + 1}>Buoy {index + 1}</option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <span>{booking.assigned_buoy ? `Buoy ${booking.assigned_buoy}` : 'Unassigned'}</span>
+                                    )}
+                                  </label>
+                                ))}
                             </div>
                           </td>
                           <td className="py-3 px-4">
@@ -406,6 +556,19 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                   />
                 </div>
               </div>
+              <div>
+                <label className="block text-slate-400 mb-1" htmlFor="session-buoy-count">Assigned Buoys *</label>
+                <input
+                  id="session-buoy-count"
+                  type="number"
+                  required
+                  min={1}
+                  step={1}
+                  value={newSession.buoy_count}
+                  onChange={(e) => setNewSession({ ...newSession, buoy_count: Number(e.target.value) })}
+                  className="w-full bg-[#071322] border border-cyan-900/60 rounded-lg p-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+                />
+              </div>
 
               <div>
                 <label className="block text-slate-400 mb-1">Operational Notes</label>
@@ -469,8 +632,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
               )}
 
               <div>
-                <label className="block text-slate-400 mb-1">Select Student *</label>
+                <label htmlFor="booking-student" className="block text-slate-400 mb-1">Select Student *</label>
                 <select
+                  id="booking-student"
                   required
                   value={enrollData.student_id}
                   onChange={(e) => setEnrollData({ ...enrollData, student_id: e.target.value })}
@@ -478,7 +642,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                 >
                   {students.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.first_name} {s.last_name} ({s.certification_agency} {s.certification_level}) - {s.medical_waiver_signed ? '✓ Waiver OK' : '⚠ Waiver Pending'}
+                      {s.first_name} {s.last_name} ({s.certification_agency} {s.certification_level}) - {s.medical_waiver_signed ? 'Waiver signed' : 'Waiver pending'}, clearance {s.medical_clearance_status || 'restricted'}
                     </option>
                   ))}
                 </select>
@@ -486,19 +650,28 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 mb-1">Price</label>
+                  <label htmlFor="booking-price" className="block text-slate-400 mb-1">Booking Total</label>
                   <input
+                    id="booking-price"
                     type="number"
+                    min={0.01}
+                    step={0.01}
                     value={enrollData.price}
                     onChange={(e) => setEnrollData({ ...enrollData, price: Number(e.target.value) })}
                     className="w-full bg-[#071322] border border-cyan-900/60 rounded-lg p-2 text-white focus:outline-none focus:border-cyan-400"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 mb-1">Currency</label>
+                  <label htmlFor="booking-currency" className="block text-slate-400 mb-1">Currency</label>
                   <select
+                    id="booking-currency"
                     value={enrollData.currency}
-                    onChange={(e) => setEnrollData({ ...enrollData, currency: e.target.value })}
+                    onChange={(e) => setEnrollData({
+                      ...enrollData,
+                      currency: e.target.value,
+                      price: e.target.value === 'EGP' ? selectedSessionForEnroll.price_egp || enrollData.price : e.target.value === 'USD' ? enrollData.price : selectedSessionForEnroll.price_eur || enrollData.price,
+                      payment_method: `Cash ${e.target.value}`,
+                    })}
                     className="w-full bg-[#071322] border border-cyan-900/60 rounded-lg p-2 text-white focus:outline-none focus:border-cyan-400"
                   >
                     <option value="EUR">EUR (€)</option>
@@ -508,19 +681,74 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="booking-deposit" className="block text-slate-400 mb-1">
+                    Recorded Deposit{ safetyRules ? ` (min ${enrollData.currency} ${(Math.ceil(enrollData.price * safetyRules.minimum_deposit_percent - 1e-9) / 100).toFixed(2)})` : ' (minimum configured in Settings)' } *
+                  </label>
+                  <input
+                    id="booking-deposit"
+                    type="number"
+                    required
+                    step={0.01}
+                    value={enrollData.deposit_amount || ''}
+                    onChange={(e) => setEnrollData({ ...enrollData, deposit_amount: Number(e.target.value) })}
+                    className="w-full bg-[#071322] border border-cyan-900/60 rounded-lg p-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="booking-payment-date" className="block text-slate-400 mb-1">Payment Date *</label>
+                  <input
+                    id="booking-payment-date"
+                    type="date"
+                    required
+                    value={enrollData.payment_date}
+                    onChange={(e) => setEnrollData({ ...enrollData, payment_date: e.target.value })}
+                    className="w-full bg-[#071322] border border-cyan-900/60 rounded-lg p-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+                  />
+                </div>
+              </div>
               <div>
-                <label className="block text-slate-400 mb-1">Payment Status</label>
+                <label htmlFor="booking-payment-method" className="block text-slate-400 mb-1">Payment Method *</label>
                 <select
-                  value={enrollData.payment_status}
-                  onChange={(e) => setEnrollData({ ...enrollData, payment_status: e.target.value })}
-                  className="w-full bg-[#071322] border border-cyan-900/60 rounded-lg p-2 text-white focus:outline-none focus:border-cyan-400"
+                  id="booking-payment-method"
+                  required
+                  value={enrollData.payment_method}
+                  onChange={(e) => setEnrollData({ ...enrollData, payment_method: e.target.value })}
+                  className="w-full bg-[#071322] border border-cyan-900/60 rounded-lg p-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
                 >
-                  <option value="unpaid">Unpaid (Issue Invoice)</option>
-                  <option value="paid">Paid in Full</option>
-                  <option value="partially_paid">Partially Paid (Deposit)</option>
+                  <option value={`Cash ${enrollData.currency}`}>Cash {enrollData.currency}</option>
+                  <option value="Credit Card">Credit Card</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="InstaPay Egypt">InstaPay Egypt</option>
                 </select>
               </div>
-
+              {selectedSessionForEnroll.prerequisites?.trim() && (
+                <label className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3 text-amber-100">
+                  <input
+                    type="checkbox"
+                    checked={enrollData.prerequisites_verified}
+                    onChange={(e) => setEnrollData({ ...enrollData, prerequisites_verified: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 accent-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400"
+                  />
+                  <span>Prerequisites reviewed and verified as met: {selectedSessionForEnroll.prerequisites}</span>
+                </label>
+              )}
+              <div>
+                <label htmlFor="booking-assigned-buoy" className="block text-slate-400 mb-1">Assigned Buoy *</label>
+                <select
+                  id="booking-assigned-buoy"
+                  required
+                  value={enrollData.assigned_buoy}
+                  onChange={(e) => setEnrollData({ ...enrollData, assigned_buoy: e.target.value })}
+                  className="w-full bg-[#071322] border border-cyan-900/60 rounded-lg p-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+                >
+                  <option value="">Select a buoy</option>
+                  {Array.from({ length: Math.max(0, selectedSessionForEnroll.buoy_count || 0) }, (_, index) => (
+                    <option key={index + 1} value={index + 1}>Buoy {index + 1}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-slate-400 mb-1">Notes / Gear Requirements</label>
                 <input
@@ -532,7 +760,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
               </div>
 
               <div className="p-3 rounded-lg bg-[#071322] border border-cyan-950 text-slate-400 text-[11px]">
-                ℹ Enrolling will automatically confirm the student's booking slot, reserve session capacity, and generate a linked customer billing invoice.
+                A booking cannot be confirmed without a valid waiver, medical clearance, sufficient recorded deposit, verified prerequisites (when required), and an explicit buoy assignment within the configured per-buoy limit. Ras Mohamed reservations remain pending until the configured participant minimum is met.
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-cyan-900/50">
@@ -548,7 +776,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                   disabled={submitting}
                   className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-[#071322] font-semibold cursor-pointer shadow-md"
                 >
-                  {submitting ? 'Confirming...' : 'Confirm Enrollment'}
+                  {submitting ? 'Recording...' : 'Record Deposit & Enroll'}
                 </button>
               </div>
             </form>

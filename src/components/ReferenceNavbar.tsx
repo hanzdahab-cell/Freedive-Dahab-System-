@@ -15,7 +15,9 @@ import {
   LogOut,
   Bell,
   CheckCircle2,
+  Menu,
 } from 'lucide-react';
+import { NavTab } from './Navigation';
 
 interface ReferenceNavbarProps {
   currentUser: User | null;
@@ -25,9 +27,11 @@ interface ReferenceNavbarProps {
   onLogout: () => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
+  onToggleMobileMenu: () => void;
+  notificationCount: number;
   inquiries: Inquiry[];
   auditLogs: AuditLog[];
-  onNavigateTab: (tab: any) => void;
+  onNavigateTab: (tab: NavTab) => void;
 }
 
 export const ReferenceNavbar: React.FC<ReferenceNavbarProps> = ({
@@ -38,6 +42,8 @@ export const ReferenceNavbar: React.FC<ReferenceNavbarProps> = ({
   onLogout,
   theme,
   onToggleTheme,
+  onToggleMobileMenu,
+  notificationCount,
   inquiries,
   auditLogs,
   onNavigateTab,
@@ -82,7 +88,16 @@ export const ReferenceNavbar: React.FC<ReferenceNavbarProps> = ({
   return (
     <header className="w-full pt-4 pb-3 px-4 sm:px-8 flex items-center justify-between gap-4">
       {/* 1. Large Rounded Search Pill matching Reference Picture */}
-      <div className="flex-1 max-w-xl">
+      <button
+        type="button"
+        onClick={onToggleMobileMenu}
+        aria-label="Open navigation"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#E8EEF7] bg-white text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4C8BF5] dark:border-slate-800 dark:bg-[#1E293B] dark:text-slate-200 md:hidden"
+      >
+        <Menu className="h-4 w-4" aria-hidden="true" />
+      </button>
+
+      <div className="hidden max-w-xl flex-1 sm:block">
         <div className="relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 rtl:left-auto rtl:right-4" />
           <input
@@ -118,11 +133,27 @@ export const ReferenceNavbar: React.FC<ReferenceNavbarProps> = ({
 
         {/* Theme Toggle */}
         <button
+          type="button"
           onClick={onToggleTheme}
+          aria-label="Toggle light and dark mode"
           title="Toggle Light / Dark Mode"
           className="w-10 h-10 rounded-xl bg-white dark:bg-[#1E293B] border border-[#E8EEF7] dark:border-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:text-[#4C8BF5] shadow-xs cursor-pointer transition-colors"
         >
           {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigateTab('notifications')}
+          aria-label={`Notifications, ${notificationCount} active updates`}
+          className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#E8EEF7] bg-white text-slate-600 shadow-xs transition-colors hover:text-[#4C8BF5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4C8BF5] dark:border-slate-800 dark:bg-[#1E293B] dark:text-slate-300"
+        >
+          <Bell className="h-4 w-4" aria-hidden="true" />
+          {notificationCount > 0 && (
+            <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">
+              {notificationCount > 99 ? '99+' : notificationCount}
+            </span>
+          )}
         </button>
 
         {/* Role Simulator Pill */}
@@ -176,7 +207,7 @@ export const ReferenceNavbar: React.FC<ReferenceNavbarProps> = ({
             onClick={() => setProfileMenuOpen(!profileMenuOpen)}
             className="flex items-center gap-3 pl-2 cursor-pointer group"
           >
-            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+            <span className="hidden text-sm font-semibold text-slate-700 dark:text-slate-200 sm:inline">
               Hi, <span className="font-bold text-slate-900 dark:text-white">{firstName}</span>
             </span>
 
@@ -218,15 +249,18 @@ export const ReferenceNavbar: React.FC<ReferenceNavbarProps> = ({
                 >
                   Settings & Preferences
                 </button>
-                <button
-                  onClick={() => {
-                    onNavigateTab('audit');
-                    setProfileMenuOpen(false);
-                  }}
-                  className="w-full text-left rtl:text-right px-3 py-2 rounded-xl text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
-                >
-                  Security Audit Logs
-                </button>
+                {currentUser?.role === 'owner' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigateTab('audit');
+                      setProfileMenuOpen(false);
+                    }}
+                    className="w-full min-h-9 text-left rtl:text-right px-3 py-2 rounded-xl text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    Security Audit Logs
+                  </button>
+                )}
               </div>
 
               <div className="pt-1 border-t border-slate-100 dark:border-slate-800">

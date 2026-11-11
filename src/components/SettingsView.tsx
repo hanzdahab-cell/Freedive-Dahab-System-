@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { UserRole } from '../types';
 import { Language, translations } from '../i18n';
 import {
@@ -18,6 +18,34 @@ interface SettingsViewProps {
   lang: Language;
 }
 
+interface BookingSafetyRules {
+  waiver_valid_days: number;
+  minimum_deposit_percent: number;
+  max_divers_per_buoy: number;
+  ras_mohamed_min_participants: number;
+}
+
+function isBookingSafetyRules(value: unknown): value is BookingSafetyRules {
+  if (!value || typeof value !== 'object') return false;
+  const rules = value as Record<string, unknown>;
+  return typeof rules.waiver_valid_days === 'number' &&
+    Number.isInteger(rules.waiver_valid_days) &&
+    rules.waiver_valid_days >= 1 &&
+    rules.waiver_valid_days <= 3650 &&
+    typeof rules.minimum_deposit_percent === 'number' &&
+    Number.isFinite(rules.minimum_deposit_percent) &&
+    rules.minimum_deposit_percent >= 1 &&
+    rules.minimum_deposit_percent <= 100 &&
+    typeof rules.max_divers_per_buoy === 'number' &&
+    Number.isInteger(rules.max_divers_per_buoy) &&
+    rules.max_divers_per_buoy >= 1 &&
+    rules.max_divers_per_buoy <= 10 &&
+    typeof rules.ras_mohamed_min_participants === 'number' &&
+    Number.isInteger(rules.ras_mohamed_min_participants) &&
+    rules.ras_mohamed_min_participants >= 1 &&
+    rules.ras_mohamed_min_participants <= 100;
+}
+
 export const SettingsView: React.FC<SettingsViewProps> = ({
   userRole,
   lang,
@@ -26,6 +54,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const isOwner = userRole === 'owner';
   const [downloading, setDownloading] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const [settings, setSettings] = useState({
     timezone: 'Africa/Cairo',
@@ -35,6 +64,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     default_vat_rate: '0.00',
     dive_sites: 'Blue Hole, Lighthouse Bay, Eel Garden, The Canyon, The Bells, Ras Abu Galum',
   });
+  const [bookingSafetyRules, setBookingSafetyRules] = useState<BookingSafetyRules>({
+    waiver_valid_days: 365,
+    minimum_deposit_percent: 30,
+    max_divers_per_buoy: 3,
+    ras_mohamed_min_participants: 4,
+  });
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<Record<string, string>>('/api/settings')
+      .then((storedSettings) => {
+        if (!active) return;
+        setSettings((current) => ({
+          timezone: storedSettings.timezone || current.timezone,
+          center_name: storedSettings.center_name || current.center_name,
+          currency_primary: storedSettings.currency_primary || current.currency_primary,
+          currency_secondary: storedSettings.currency_secondary || current.currency_secondary,
+          default_vat_rate: storedSettings.default_vat_rate || current.default_vat_rate,
+          dive_sites: storedSettings.dive_sites || current.dive_sites,
+        }));
+        if (storedSettings.booking_safety_rules) {
+          const parsed: unknown = JSON.parse(storedSettings.booking_safety_rules);
+          if (isBookingSafetyRules(parsed)) {
+            setBookingSafetyRules(parsed);
+          } else {
+            setSettingsError('Saved booking safety rules are invalid. An owner must correct them before bookings can proceed.');
+          }
+        }
+      })
+      .catch((err: Error) => {
+        if (active) setSettingsError(err.message || 'Failed to load system settings');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleExportBackup = async () => {
     setDownloading(true);
@@ -58,15 +123,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSettingsError(null);
     try {
       await apiRequest('/api/settings', {
         method: 'PATCH',
-        body: JSON.stringify({ settings }),
+        body: JSON.stringify({
+          settings: {
+            ...settings,
+            booking_safety_rules: bookingSafetyRules,
+          },
+        }),
       });
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err: any) {
-      alert(err.message || 'Failed to save settings');
+      setSettingsError(err.message || 'Failed to save settings');
     }
   };
 
@@ -89,6 +160,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>System configuration updated successfully on server.</span>
         </div>
       )}
+      {settingsError && (
+        <p role="alert" className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">
+          {settingsError}
+        </p>
+      )}
 
       {/* Settings Form */}
       <form onSubmit={handleSaveSettings} className="bg-white dark:bg-[#1E293B] border border-[#E8EEF7] dark:border-slate-800 rounded-2xl p-6 space-y-5 text-xs shadow-xs">
@@ -108,6 +184,76 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="w-full bg-[#F4F6FA] dark:bg-[#071322] border border-[#E8EEF7] dark:border-slate-800 rounded-xl p-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-[#4C8BF5] disabled:opacity-60"
             />
           </div>
+
+          <section className="space-y-4 border-t border-[#E8EEF7] dark:border-slate-800 pt-5" aria-labelledby="booking-safety-settings-heading">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-amber-500" />
+              <h3 id="booking-safety-settings-heading" className="text-sm font-extrabold text-[#28334E] dark:text-white">
+                Booking Safety Gate
+              </h3>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              These owner-managed thresholds are enforced by the server before course bookings are confirmed.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="waiver-valid-days" className="block text-slate-600 dark:text-slate-400 mb-1 font-semibold">Waiver validity (days)</label>
+                <input
+                  id="waiver-valid-days"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  step={1}
+                  disabled={!isOwner}
+                  value={bookingSafetyRules.waiver_valid_days}
+                  onChange={(event) => setBookingSafetyRules({ ...bookingSafetyRules, waiver_valid_days: Number(event.target.value) })}
+                  className="w-full bg-[#F4F6FA] dark:bg-[#071322] border border-[#E8EEF7] dark:border-slate-800 rounded-xl p-2.5 text-slate-900 dark:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-60"
+                />
+              </div>
+              <div>
+                <label htmlFor="minimum-deposit-percent" className="block text-slate-600 dark:text-slate-400 mb-1 font-semibold">Minimum deposit (%)</label>
+                <input
+                  id="minimum-deposit-percent"
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={0.1}
+                  disabled={!isOwner}
+                  value={bookingSafetyRules.minimum_deposit_percent}
+                  onChange={(event) => setBookingSafetyRules({ ...bookingSafetyRules, minimum_deposit_percent: Number(event.target.value) })}
+                  className="w-full bg-[#F4F6FA] dark:bg-[#071322] border border-[#E8EEF7] dark:border-slate-800 rounded-xl p-2.5 text-slate-900 dark:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-60"
+                />
+              </div>
+              <div>
+                <label htmlFor="max-divers-per-buoy" className="block text-slate-600 dark:text-slate-400 mb-1 font-semibold">Maximum divers per buoy</label>
+                <input
+                  id="max-divers-per-buoy"
+                  type="number"
+                  min={1}
+                  max={10}
+                  step={1}
+                  disabled={!isOwner}
+                  value={bookingSafetyRules.max_divers_per_buoy}
+                  onChange={(event) => setBookingSafetyRules({ ...bookingSafetyRules, max_divers_per_buoy: Number(event.target.value) })}
+                  className="w-full bg-[#F4F6FA] dark:bg-[#071322] border border-[#E8EEF7] dark:border-slate-800 rounded-xl p-2.5 text-slate-900 dark:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-60"
+                />
+              </div>
+              <div>
+                <label htmlFor="ras-min-participants" className="block text-slate-600 dark:text-slate-400 mb-1 font-semibold">Ras Mohamed minimum participants</label>
+                <input
+                  id="ras-min-participants"
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  disabled={!isOwner}
+                  value={bookingSafetyRules.ras_mohamed_min_participants}
+                  onChange={(event) => setBookingSafetyRules({ ...bookingSafetyRules, ras_mohamed_min_participants: Number(event.target.value) })}
+                  className="w-full bg-[#F4F6FA] dark:bg-[#071322] border border-[#E8EEF7] dark:border-slate-800 rounded-xl p-2.5 text-slate-900 dark:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-60"
+                />
+              </div>
+            </div>
+          </section>
 
           <div>
             <label className="block text-slate-600 dark:text-slate-400 mb-1 font-semibold">Configured Timezone</label>

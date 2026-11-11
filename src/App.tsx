@@ -13,10 +13,15 @@ import {
   Booking,
   DailyActivity,
   Invoice,
+  InvoiceUpdateInput,
+  CustomerRequest,
+  CustomerRequestInput,
+  PaymentInput,
   Expense,
   PayrollPeriod,
   PayrollRecord,
   Equipment,
+  EquipmentCheckout,
   AuditLog,
   Inquiry,
 } from './types';
@@ -36,6 +41,8 @@ import { PayrollView } from './components/PayrollView';
 import { EquipmentView } from './components/EquipmentView';
 import { AuditView } from './components/AuditView';
 import { SettingsView } from './components/SettingsView';
+import { NotificationsView } from './components/NotificationsView';
+import { PosView } from './components/PosView';
 import {
   Waves,
   Shield,
@@ -54,6 +61,7 @@ export default function App() {
   const [lang, setLang] = useState<Language>('en');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Core ERP State
   const [students, setStudents] = useState<Student[]>([]);
@@ -64,11 +72,13 @@ export default function App() {
   const [activities, setActivities] = useState<DailyActivity[]>([]);
   const [staff, setStaff] = useState<User[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [customerRequests, setCustomerRequests] = useState<CustomerRequest[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payrollPeriods, setPayrollPeriods] = useState<PayrollPeriod[]>([]);
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
   const [selectedPayrollPeriodId, setSelectedPayrollPeriodId] = useState<string>('');
   const [equipment, setEquipment] = useState<Equipment[]>([]);
+  const [equipmentCheckouts, setEquipmentCheckouts] = useState<EquipmentCheckout[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   // Login form state
@@ -104,6 +114,7 @@ export default function App() {
         activitiesRes,
         staffRes,
         equipmentRes,
+        equipmentCheckoutsRes,
       ] = await Promise.all([
         apiRequest<Student[]>('/api/students').catch(() => []),
         apiRequest<Inquiry[]>('/api/inquiries').catch(() => []),
@@ -113,6 +124,7 @@ export default function App() {
         apiRequest<DailyActivity[]>('/api/activities').catch(() => []),
         apiRequest<User[]>('/api/users').catch(() => []),
         apiRequest<Equipment[]>('/api/equipment').catch(() => []),
+        apiRequest<EquipmentCheckout[]>('/api/equipment/checkouts').catch(() => []),
       ]);
 
       setStudents(studentsRes);
@@ -123,17 +135,26 @@ export default function App() {
       setActivities(activitiesRes);
       setStaff(staffRes);
       setEquipment(equipmentRes);
+      setEquipmentCheckouts(equipmentCheckoutsRes);
 
       // Load restricted data based on current user role
       if (currentUser && ['owner', 'finance'].includes(currentUser.role)) {
-        const [invoicesRes, expensesRes] = await Promise.all([
+        const [invoicesRes, requestsRes, expensesRes] = await Promise.all([
           apiRequest<Invoice[]>('/api/finance/invoices').catch(() => []),
+          apiRequest<CustomerRequest[]>('/api/customer-requests').catch(() => []),
           apiRequest<Expense[]>('/api/finance/expenses').catch(() => []),
         ]);
         setInvoices(invoicesRes);
+        setCustomerRequests(requestsRes);
         setExpenses(expensesRes);
+      } else if (currentUser?.role === 'front_desk_crm') {
+        const requestsRes = await apiRequest<CustomerRequest[]>('/api/customer-requests').catch(() => []);
+        setCustomerRequests(requestsRes);
+        setInvoices([]);
+        setExpenses([]);
       } else {
         setInvoices([]);
+        setCustomerRequests([]);
         setExpenses([]);
       }
 
@@ -207,10 +228,12 @@ export default function App() {
       setCurrentUser(res.user);
 
       // Route away if current tab is restricted
-      if (['finance', 'payroll', 'audit'].includes(activeTab)) {
+      if (['finance', 'payroll', 'audit', 'pos'].includes(activeTab)) {
         if (activeTab === 'audit' && targetRole !== 'owner') {
           setActiveTab('dashboard');
-        } else if (activeTab === 'finance' && !['owner', 'finance'].includes(targetRole)) {
+        } else if (activeTab === 'pos' && !['owner', 'finance', 'front_desk_crm'].includes(targetRole)) {
+          setActiveTab('dashboard');
+        } else if (activeTab === 'finance' && !['owner', 'finance', 'front_desk_crm'].includes(targetRole)) {
           setActiveTab('dashboard');
         } else if (activeTab === 'payroll' && !['owner', 'finance', 'hr'].includes(targetRole)) {
           setActiveTab('dashboard');
@@ -219,6 +242,11 @@ export default function App() {
     } catch (err: any) {
       alert(err.message || 'Failed to switch role');
     }
+  };
+
+  const handleTabChange = (tab: NavTab) => {
+    setActiveTab(tab);
+    setIsMobileSidebarOpen(false);
   };
 
   // Sign out
@@ -384,6 +412,22 @@ export default function App() {
 
   const instructorsList = staff.filter((s) => ['instructor', 'operations_manager', 'owner'].includes(s.role));
   const isDark = theme === 'dark';
+  const notificationToday = new Date().toISOString().slice(0, 10);
+  const notificationHorizon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const operationalNotificationCount =
+    inquiries.filter((inquiry) => inquiry.status === 'new').length +
+    equipment.filter((item) => item.quantity_available <= item.low_stock_threshold).length +
+    sessions.filter((session) =>
+      session.status !== 'cancelled' &&
+      session.start_date >= notificationToday &&
+      session.start_date <= notificationHorizon,
+    ).length +
+    activities.filter((activity) =>
+      activity.status !== 'completed' &&
+      activity.status !== 'cancelled_weather' &&
+      activity.activity_date >= notificationToday &&
+      activity.activity_date <= notificationHorizon,
+    ).length;
 
   return (
     <div className={`min-h-screen flex flex-col font-sans selection:bg-[#4C8BF5] selection:text-white ${
@@ -392,7 +436,9 @@ export default function App() {
       {/* Sidebar matching Reference Picture (Left, Full Height with rounded-br-[42px]) */}
       <ReferenceSidebar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
+        isMobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
         userRole={currentUser.role}
         currentUser={currentUser}
         isCollapsed={isSidebarCollapsed}
@@ -420,24 +466,27 @@ export default function App() {
           onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')}
           inquiries={inquiries}
           auditLogs={auditLogs}
-          onNavigateTab={setActiveTab}
+          onNavigateTab={handleTabChange}
+          onToggleMobileMenu={() => setIsMobileSidebarOpen((open) => !open)}
+          notificationCount={operationalNotificationCount}
         />
 
         {/* Content Area */}
         <main className="flex-1 px-4 sm:px-8 py-4 space-y-6 max-w-7xl w-full mx-auto">
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              currentUser={currentUser}
-              students={students}
-              sessions={sessions}
+            {activeTab === 'dashboard' && (
+              <DashboardView
+                currentUser={currentUser}
+                students={students}
+                sessions={sessions}
                 activities={activities}
                 equipment={equipment}
                 invoices={invoices}
+                customerRequests={customerRequests}
+                expenses={expenses}
                 inquiries={inquiries}
-                onNavigate={setActiveTab}
+                onNavigate={handleTabChange}
                 onOpenQuickModal={handleOpenQuickModal}
-                lang={lang}
-                theme={theme}
+                onRefresh={loadAllData}
               />
             )}
 
@@ -454,6 +503,12 @@ export default function App() {
                   await apiRequest(`/api/students/${id}/waiver`, {
                     method: 'POST',
                     body: JSON.stringify({ signed, notes }),
+                  });
+                }}
+                onUpdateMedicalClearance={async (id, status) => {
+                  await apiRequest(`/api/students/${id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ medical_clearance_status: status }),
                   });
                 }}
                 onCreateInquiry={async (data) => {
@@ -482,6 +537,12 @@ export default function App() {
                 onScheduleSession={async (data) => {
                   await apiRequest('/api/sessions', { method: 'POST', body: JSON.stringify(data) });
                 }}
+                onUpdateSession={async (id, data) => {
+                  await apiRequest(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+                }}
+                onUpdateBooking={async (id, data) => {
+                  await apiRequest(`/api/bookings/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+                }}
                 onEnrollBooking={async (data) => {
                   await apiRequest('/api/bookings', { method: 'POST', body: JSON.stringify(data) });
                 }}
@@ -495,6 +556,27 @@ export default function App() {
                 activities={activities}
                 instructors={instructorsList}
                 lang={lang}
+              />
+            )}
+
+            {activeTab === 'notifications' && (
+              <NotificationsView
+                sessions={sessions}
+                activities={activities}
+                equipment={equipment}
+                inquiries={inquiries}
+                onNavigate={handleTabChange}
+              />
+            )}
+
+            {activeTab === 'pos' && (
+              <PosView
+                students={students}
+                equipment={equipment}
+                onCreateCustomerRequest={async (data: CustomerRequestInput) => {
+                  await apiRequest('/api/customer-requests', { method: 'POST', body: JSON.stringify(data) });
+                }}
+                onRefresh={loadAllData}
               />
             )}
 
@@ -540,6 +622,7 @@ export default function App() {
             {activeTab === 'finance' && (
               <FinanceView
                 invoices={invoices}
+                customerRequests={customerRequests}
                 expenses={expenses}
                 students={students}
                 userRole={currentUser.role}
@@ -547,10 +630,25 @@ export default function App() {
                 onCreateInvoice={async (data) => {
                   await apiRequest('/api/finance/invoices', { method: 'POST', body: JSON.stringify(data) });
                 }}
+                onUpdateInvoice={async (invoiceId: string, changes: InvoiceUpdateInput) => {
+                  await apiRequest(`/api/finance/invoices/${invoiceId}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify(changes),
+                  });
+                }}
                 onRecordPayment={async (invId, pmt) => {
                   await apiRequest(`/api/finance/invoices/${invId}/payments`, {
                     method: 'POST',
                     body: JSON.stringify(pmt),
+                  });
+                }}
+                onCreateCustomerRequest={async (data: CustomerRequestInput) => {
+                  await apiRequest('/api/customer-requests', { method: 'POST', body: JSON.stringify(data) });
+                }}
+                onRecordCustomerRequestPayment={async (requestId: string, payment: PaymentInput) => {
+                  await apiRequest(`/api/customer-requests/${requestId}/payments`, {
+                    method: 'POST',
+                    body: JSON.stringify(payment),
                   });
                 }}
                 onCreateExpense={async (data) => {
@@ -587,6 +685,7 @@ export default function App() {
             {activeTab === 'equipment' && (
               <EquipmentView
                 equipment={equipment}
+                checkouts={equipmentCheckouts}
                 students={students}
                 instructors={instructorsList}
                 userRole={currentUser.role}

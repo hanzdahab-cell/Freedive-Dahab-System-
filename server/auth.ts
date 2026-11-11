@@ -185,6 +185,7 @@ export function maskStudentData(student: any, userRole: string) {
     return {
       ...student,
       medical_notes: student.medical_waiver_signed ? '[Restricted: Health clearance on file]' : '[Restricted: Pending waiver]',
+      medical_clearance_status: undefined,
     };
   }
   return student;
